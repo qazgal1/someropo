@@ -2,10 +2,26 @@ param(
     [string]$Server = "https://ki8ucb.wormhole.bar"
 )
 
-$running = Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
-    Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match '\.ps1' }
+function Get-SelfAndParents {
+    $ids = @()
+    $cur = $PID
+    while ($cur -and $cur -notin $ids) {
+        $p = Get-CimInstance Win32_Process -Filter "ProcessId=$cur"
+        if (-not $p) { break }
+        $ids += $p.ProcessId
+        $cur = $p.ParentProcessId
+    }
+    return $ids
+}
 
-if ($running) {
+$skip = Get-SelfAndParents
+
+# Other PowerShell processes running a .ps1 (not us, not our launchers)
+$others = Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" |
+    Where-Object { $_.CommandLine -match '\.ps1' -and $_.ProcessId -notin $skip }
+
+if ($others) {
+    Write-Host "Another copy is already running (PID: $($others.ProcessId -join ', ')). Exiting."
     exit
 }
 
