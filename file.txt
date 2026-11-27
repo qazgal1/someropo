@@ -2,7 +2,13 @@ param(
     [string]$Server = "https://ki8ucb.wormhole.bar"
 )
 
+$myPath = $MyInvocation.MyCommand.Path
+$others = Get-CimInstance Win32_Process |
+    Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -like "*$myPath*" }
 
+if ($others) {
+    exit
+}
 
 
 # Turns a received message into a reply. Messages starting with "!" are commands.
