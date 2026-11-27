@@ -2,16 +2,6 @@ param(
     [string]$Server = "https://ki8ucb.wormhole.bar"
 )
 
-$mutexName = "Local\MyScript_SingleInstance"   # keep this name the same in every copy
-$createdNew = $false
-$mutex = New-Object System.Threading.Mutex($true, $mutexName, [ref]$createdNew)
-
-if (-not $createdNew) {
-    $mutex.Dispose()
-    exit
-}
-
-
 
 
 
@@ -33,7 +23,7 @@ try {
     $msgs = Invoke-RestMethod -Uri "$Server/recv?since=$since" -Method Get
     foreach ($m in $msgs) { $since = $m.id }
 } catch { }
-try {
+
 while ($true) {
     try {
         $msgs = Invoke-RestMethod -Uri "$Server/recv?since=$since" -Method Get
@@ -50,7 +40,4 @@ while ($true) {
     Start-Sleep -Seconds 1
 }
 }
-finally {
-    $mutex.ReleaseMutex()
-    $mutex.Dispose()
-}
+
