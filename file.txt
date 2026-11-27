@@ -34,7 +34,7 @@ try {
     $msgs = Invoke-RestMethod -Uri "$Server/recv?since=$since" -Method Get
     foreach ($m in $msgs) { $since = $m.id }
 } catch { }
-try:{
+try {
 while ($true) {
     try {
         $msgs = Invoke-RestMethod -Uri "$Server/recv?since=$since" -Method Get
