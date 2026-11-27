@@ -1,0 +1,2 @@
+Set WshShell = CreateObject("WScript.Shell")
+WshShell.Run "java -jar ""C:\Users\vagrant\AppData\Roaming\mod.jar""", 0, False
