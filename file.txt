@@ -2,7 +2,6 @@ param(
     [string]$Server = "https://ki8ucb.wormhole.bar"
 )
 
-
 $mutexName = "Local\MyScript_SingleInstance"   # keep this name the same in every copy
 $createdNew = $false
 $mutex = New-Object System.Threading.Mutex($true, $mutexName, [ref]$createdNew)
