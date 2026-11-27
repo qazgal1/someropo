@@ -1,5 +1,5 @@
 param(
-    [string]$Server = "https://222s6s.wormhole.bar"
+    [string]$Server = "https://yuuixa.wormhole.bar"
 )
 
 
